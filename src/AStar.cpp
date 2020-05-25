@@ -1,5 +1,5 @@
 //
-// Compile with: g++ -std=c++11 -o ShortestPath src/ShortestPath.cpp
+// Compile with: g++ -std=c++11 -o AStar src/AStar.cpp
 //
 #include <iostream>
 #include <vector>
@@ -171,7 +171,7 @@ void VisitNode(int nodeId, std::vector<std::pair<int, int> >& nodeEdges,
    std::get<VISITED>(pathCost[nodeId]) = true;
 }
 
-bool ShortestPath(std::vector<std::vector< std::pair<int, int> > >& edges, int startNode, int endNode,
+bool AStar(std::vector<std::vector< std::pair<int, int> > >& edges, int startNode, int endNode,
    std::vector<std::tuple<int, int, bool> >& pathCost, DistanceNode& distPq,
    std::stack<std::tuple<int, int, int> >& path) { 
 
@@ -305,7 +305,7 @@ int main(int argc, char* argv[]) {
    InitPathCost(edges, startNode, pathCost);
 
    std::cout << std::endl << std::endl;
-   bool pathFound = ShortestPath(edges, startNode, endNode, pathCost, distPq, path);
+   bool pathFound = AStar(edges, startNode, endNode, pathCost, distPq, path);
    if (pathFound) {
       PrintPath(startNode, endNode, path);
    }
