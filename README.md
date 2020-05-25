@@ -1,5 +1,5 @@
-# DijkstraShortestPath
+# A* ShortestPath
 
-Implementation based on this video: https://youtu.be/GazC3A4OQTE
+Implementation based on this video: https://youtu.be/ySN5Wnu88nE
 
-![](images/GraphUsedInVideo.png)
+![](images/AStarGraph.png)
