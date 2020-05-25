@@ -11,6 +11,7 @@
 #define NODE 0
 #define DISTANCE 1
 #define PATHVIA 2
+#define COMBINED_HEURISTIC 3
 #define VISITED 2
 #define UNKNOWN_NODE 99
 #define UNKNOWN_DISTANCE std::numeric_limits<int>::max()
@@ -18,13 +19,14 @@
 class MyCompare
 {
    public:
-      bool operator() (const std::tuple<int, int, int>& a, const std::tuple<int, int, int>& b)
+      bool operator() (const std::tuple<int, int, int, int>& a, const std::tuple<int, int, int, int>& b)
       {
-         return std::get<DISTANCE>(a) > std::get<DISTANCE>(b);
+         return std::get<COMBINED_HEURISTIC>(a) > std::get<COMBINED_HEURISTIC>(b);
       }
 };
 
-typedef std::priority_queue<std::tuple<int, int, int>, std::vector< std::tuple<int, int, int> >, MyCompare > DistanceNode;
+typedef std::priority_queue<std::tuple<int, int, int, int>, \
+   std::vector< std::tuple<int, int, int, int> >, MyCompare > DistanceNode;
 
 int ConvertNodeLetter(char* letter) {
    switch (letter[0]) {
@@ -125,19 +127,22 @@ void PrintPriorities(DistanceNode& distPq) {
    while (!distPq.empty()) {
       auto nodeDistance = distPq.top();
       distPq.pop();
-      std::cout << "Priority " << std::get<NODE>(nodeDistance) << ", " 
-         << std::get<DISTANCE>(nodeDistance) << ", " << std::get<PATHVIA>(nodeDistance) << std::endl;
+      std::cout << "Priority " << std::get<NODE>(nodeDistance)
+         << ", " << std::get<DISTANCE>(nodeDistance)
+         << ", " << std::get<PATHVIA>(nodeDistance)
+         << ", " << std::get<COMBINED_HEURISTIC>(nodeDistance)
+         << std::endl;
    }
 }
 
-void UpdatePriorityQueue(int node, int distance, int nodeVia, DistanceNode& distPq) {
+void UpdatePriorityQueue(int node, int distance, int nodeVia, int combinedHeuristic, DistanceNode& distPq) {
    DistanceNode tmpPq;
    bool found(false);
    while (!distPq.empty()) {
-      const std::tuple<int, int, int>& distNode = distPq.top();
+      const std::tuple<int, int, int, int>& distNode = distPq.top();
       if (std::get<NODE>(distNode) == node) {
          // replace node in priority queue
-         tmpPq.push(std::make_tuple(node, distance, nodeVia));
+         tmpPq.push(std::make_tuple(node, distance, nodeVia, combinedHeuristic));
          std::cout << "   Update distNode: " << GetNodeLetter(node) << ", " << distance << ", via: "
             << GetNodeLetter(nodeVia) << std::endl;
          found = true;
@@ -148,32 +153,42 @@ void UpdatePriorityQueue(int node, int distance, int nodeVia, DistanceNode& dist
       distPq.pop();
    }
    if (!found) {
-      tmpPq.push(std::make_tuple(node, distance, nodeVia));
+      tmpPq.push(std::make_tuple(node, distance, nodeVia, combinedHeuristic));
       std::cout << "   Add distNode: " << GetNodeLetter(node) << ", " << distance << ", via: "
-         << GetNodeLetter(nodeVia) << std::endl;
+         << GetNodeLetter(nodeVia) << ", combinedHeuristic: " << combinedHeuristic << std::endl;
    }
    distPq = tmpPq;
 }
 
 void VisitNode(int nodeId, std::vector<std::pair<int, int> >& nodeEdges,
-   int endNode, std::vector<std::tuple<int, int, bool> >& pathCost, DistanceNode& distPq) { 
-
-   std::cout << std::endl << "Visiting node: " <<  GetNodeLetter(nodeId) << std::endl;
+   std::vector<std::vector<int> >& nodeHeuristic,
+   int endNode, std::vector<std::tuple<int, int, bool, int> >& pathCost, DistanceNode& distPq) { 
 
    for (const auto edge : nodeEdges) {
+      // Looking at the edges associated with nodeId; i.e., what is nodeId connected to in the graph
       if (! std::get<VISITED>(pathCost[edge.first])) {
-         if (std::get<DISTANCE>(pathCost[edge.first]) > edge.second + std::get<DISTANCE>(pathCost[nodeId])) {
+         // Using edge as X -> Y, where X is nodeId and Y is edge.first. The combined heuristic cost is the 
+         // combined cost of the shortest path calculated to Y, plus the physical distance of Y to endNode.
+         // If combined heuristic cost of getting to Y, as previously calculated from startNode, is greater than
+         // the combined heuristic cost of the distance from X to Y plus the cost to get from startNode to X plus
+         // the physical distance of X to endNode; then a better path has been found to endNode through Y via X.
+         if (std::get<COMBINED_HEURISTIC>(pathCost[edge.first])
+               > edge.second + std::get<DISTANCE>(pathCost[nodeId]) + nodeHeuristic[edge.first][endNode]) {
             std::get<DISTANCE>(pathCost[edge.first]) = edge.second + std::get<DISTANCE>(pathCost[nodeId]);
-            UpdatePriorityQueue(edge.first, std::get<DISTANCE>(pathCost[edge.first]), nodeId, distPq);
+            std::get<COMBINED_HEURISTIC>(pathCost[edge.first]) = 
+               std::get<DISTANCE>(pathCost[edge.first]) + nodeHeuristic[edge.first][endNode];
+            UpdatePriorityQueue(edge.first, std::get<DISTANCE>(pathCost[edge.first]), nodeId,
+               std::get<COMBINED_HEURISTIC>(pathCost[edge.first]), distPq);
          }
       }
    }
    std::get<VISITED>(pathCost[nodeId]) = true;
 }
 
-bool AStar(std::vector<std::vector< std::pair<int, int> > >& edges, int startNode, int endNode,
-   std::vector<std::tuple<int, int, bool> >& pathCost, DistanceNode& distPq,
-   std::stack<std::tuple<int, int, int> >& path) { 
+bool AStar(std::vector<std::vector< std::pair<int, int> > >& edges, 
+   std::vector<std::vector<int> >& nodeHeuristic, int startNode, int endNode,
+   std::vector<std::tuple<int, int, bool, int> >& pathCost, DistanceNode& distPq,
+   std::stack<std::tuple<int, int, int, int> >& path) { 
 
    std::cout << "Finding shortest path from: " << GetNodeLetter(startNode) << " to: " 
       << GetNodeLetter(endNode) << std::endl;
@@ -185,15 +200,17 @@ bool AStar(std::vector<std::vector< std::pair<int, int> > >& edges, int startNod
          std::cout << "Priority queue is empty before end node is found. Aborting path search." << std::endl;
          searchComplete = true;
       } else {
-         std::tuple<int, int, int> nextNode = distPq.top();
+         std::tuple<int, int, int, int> nextNode = distPq.top();
          distPq.pop();
          int nodeId = std::get<NODE>(nextNode);
 
+         std::cout << std::endl << "Visiting node: " <<  GetNodeLetter(nodeId) << std::endl;
          if (nodeId == endNode) {
+            std::cout << "   Arrived at destination: " <<  GetNodeLetter(nodeId) << std::endl;
             searchComplete = true;
             pathFound = true;
          } else {
-            VisitNode(nodeId, edges[nodeId], endNode, pathCost, distPq);
+            VisitNode(nodeId, edges[nodeId], nodeHeuristic, endNode, pathCost, distPq);
          }
          path.push(nextNode);
       }
@@ -202,33 +219,48 @@ bool AStar(std::vector<std::vector< std::pair<int, int> > >& edges, int startNod
 }
 
 void InitGraph(std::vector<std::vector< std::pair<int, int> > >& edges) {
-   // edge 0 -> X  (Start -> X)
+
+   // The pairs in the edges:
+   //    * first is the other end of the edge defined by X -> Y;
+   //    * second is the cost to get from X -> Y
+
+   // S: edges: S -> A; S -> B; S -> C
    edges.push_back({ std::make_pair(1, 7), std::make_pair(2, 2), std::make_pair(3, 3) });
-   // edge 1 -> X  (A -> X)
+
+   // A: edges: A -> S; A -> B; A -> D
    edges.push_back({ std::make_pair(0, 7), std::make_pair(2, 3), std::make_pair(4, 4) });
-   // edge 2 -> X  (B -> X)
+
+   // B: edges: B -> S; B -> A; B -> D; B -> H
    edges.push_back({ std::make_pair(0, 2), std::make_pair(1, 3), std::make_pair(4, 4), std::make_pair(8, 1) });
-   // edge 3 -> X  (C -> X)
+
+   // C: edges: C -> S; C -> L
    edges.push_back({ std::make_pair(0, 3), std::make_pair(12, 2) });
-   // edge 4 -> X  (D -> X)
+
+   // D: edges: D -> A; D -> B; D -> F
    edges.push_back({ std::make_pair(1, 4), std::make_pair(2, 4), std::make_pair(6, 5) });
 
-   // edge 5 -> X  (E -> X)
+   // E: edges: E -> G; E -> K
    edges.push_back({ std::make_pair(7, 2), std::make_pair(11, 5) });
 
-   // edge 6 -> X  (F -> X)
+   // F: edges: F -> D; F -> H
    edges.push_back({ std::make_pair(4, 5), std::make_pair(8, 3) });
-   // edge 7 -> X  (G -> X)
+
+   // G: edges: G -> E; G -> H
    edges.push_back({ std::make_pair(5, 2), std::make_pair(8, 2) });
-   // edge 8 -> X  (H -> X)
+
+   // H: edges: H -> B; H -> F; H -> G
    edges.push_back({ std::make_pair(2, 1), std::make_pair(6, 3), std::make_pair(7, 2) });
-   // edge 9 -> X  (I -> X)
+
+   // I: edges: I -> J; I -> K; I -> L
    edges.push_back({ std::make_pair(10, 6), std::make_pair(11, 4), std::make_pair(12, 4) });
-   // edge 10 -> X  (J -> X)
+
+   // J: edges: J -> I; J -> K; J -> L
    edges.push_back({ std::make_pair(9, 6), std::make_pair(11, 4), std::make_pair(12, 4) });
-   // edge 11 -> X  (K -> X)
+
+   // K: edges: K -> E; K -> I; K -> J
    edges.push_back({ std::make_pair(5, 5), std::make_pair(9, 4), std::make_pair(10, 4) });
-   // edge 12 -> X  (L -> X)
+
+   // L: edges: L -> C; L -> I; L -> J
    edges.push_back({ std::make_pair(3, 2), std::make_pair(9, 4), std::make_pair(10, 4) });
 }
 
@@ -242,26 +274,71 @@ void PrintGraph(std::vector<std::vector< std::pair<int, int> > >& edges) {
    }
 }
 
-void InitPathCost(std::vector<std::vector< std::pair<int, int> > >& edges,
-   int startNode, std::vector<std::tuple<int, int, bool> >& pathCost) {
+void InitNodeHeuristics(std::vector<std::vector<int> >& nodeHeuristic) {
+   // The heuristic is the straight-line distance from the node to every other node.
+   
+   // Node S
+   //           distance to: S  A  B  C  D   E  F  G  H  I  J  K  L
+   nodeHeuristic.push_back({ 0, 7, 2, 3, 4, 10, 7, 7, 5, 7, 8, 9, 6 });
 
-   // tuple is previous node, distance, and visited
-   pathCost[startNode] = std::make_tuple(startNode, 0, false);
+   // Node A
+   nodeHeuristic.push_back({ 3, 0, 2, 6, 2, 9, 5, 6, 4, 8, 10, 10, 9 });
+
+   // Node B
+   nodeHeuristic.push_back({ 2, 2, 0, 4, 2, 7, 4, 4, 1, 5, 7, 7, 6 });
+
+   // Node C
+   nodeHeuristic.push_back({ 3, 6, 4, 0, 5, 8, 8, 6, 5, 3, 4, 5, 2 });
+
+   // Node D
+   nodeHeuristic.push_back({ 4, 2, 2, 5, 0, 8, 2, 4, 2, 7, 9, 9, 9 });
+
+   // Node E
+   nodeHeuristic.push_back({ 10, 9, 7, 8, 8, 0, 6, 3, 6, 4, 4, 3, 6 });
+
+   // Node F
+   nodeHeuristic.push_back({ 7, 5, 4, 8, 2, 6, 0, 2, 2, 5, 6, 5, 6 });
+
+   // Node G
+   nodeHeuristic.push_back({ 7, 6, 4, 6, 4, 3, 2, 0, 2, 3, 4, 3, 4 });
+
+   // Node H
+   nodeHeuristic.push_back({ 5, 4, 1, 5, 2, 6, 2, 2, 0, 4, 7, 6, 7 });
+
+   // Node I
+   nodeHeuristic.push_back({ 7, 8, 5, 3, 7, 4, 5, 3, 4, 0, 2, 2, 2 });
+
+   // Node J
+   nodeHeuristic.push_back({ 8, 10, 7, 4, 9, 4, 6, 4, 7, 2, 0, 2, 2 });
+
+   // Node K
+   nodeHeuristic.push_back({ 9, 10, 7, 5, 9, 3, 5, 3, 6, 2, 2, 0, 3 });
+
+   // Node L
+   nodeHeuristic.push_back({ 6, 9, 6, 2, 9, 6, 6, 4, 7, 2, 2, 3, 0 });
+}
+
+void InitPathCost(std::vector<std::vector< std::pair<int, int> > >& edges,
+   int startNode, int endNode, std::vector<std::vector<int> >& nodeHeuristic,
+   std::vector<std::tuple<int, int, bool, int> >& pathCost) {
+
+   // tuple is previous node, distance, visited, combined heuristic cost
+   pathCost[startNode] = std::make_tuple(startNode, 0, false, nodeHeuristic[startNode][endNode]);
 
    for (int i = 0; i < edges.size(); i++) {
       if (i != startNode) {
-         pathCost[i] = std::make_tuple(UNKNOWN_NODE, UNKNOWN_DISTANCE, false);
+         pathCost[i] = std::make_tuple(UNKNOWN_NODE, UNKNOWN_DISTANCE, false, UNKNOWN_DISTANCE);
          //std::cout << "pathCost " << GetNodeLetter(i) << ", " 
          //   <<  GetNodeLetter(std::get<NODE>(pathCost[i])) << ", " << std::get<DISTANCE>(pathCost[i]) << std::endl;
       } 
    }
 }
 
-void PrintPath(int startNode, int endNode, std::stack<std::tuple<int, int, int> >& path) {
+void PrintPath(int startNode, int endNode, std::stack<std::tuple<int, int, int, int> >& path) {
    int nextNode(endNode);
    std::cout << std::endl << std::endl << "Path in reverse order:" << std::endl;
    while (! path.empty()) {
-      std::tuple<int, int, int>& distNode = path.top();
+      std::tuple<int, int, int, int>& distNode = path.top();
       if (std::get<NODE>(distNode) == nextNode) {
          std::cout << GetNodeLetter(std::get<NODE>(distNode)) << " <-- "
             << GetNodeLetter(std::get<PATHVIA>(distNode))
@@ -293,19 +370,21 @@ int main(int argc, char* argv[]) {
       return 1;
    }
 
-   std::stack<std::tuple<int, int, int> > path;
+   std::stack<std::tuple<int, int, int, int> > path;
    std::vector<std::vector< std::pair<int, int> > > edges;
+   std::vector<std::vector<int> > nodeHeuristic;
 
    InitGraph(edges);
    PrintGraph(edges);
+   InitNodeHeuristics(nodeHeuristic);
 
-   std::vector<std::tuple<int, int, bool> > pathCost(edges.size());
+   std::vector<std::tuple<int, int, bool, int> > pathCost(edges.size());
    DistanceNode distPq; // distance priority queue
-   distPq.push(std::make_tuple(startNode, 0, startNode)); // start with the startNode
-   InitPathCost(edges, startNode, pathCost);
+   distPq.push(std::make_tuple(startNode, 0, startNode, nodeHeuristic[startNode][endNode])); // start with the startNode
+   InitPathCost(edges, startNode, endNode, nodeHeuristic, pathCost);
 
    std::cout << std::endl << std::endl;
-   bool pathFound = AStar(edges, startNode, endNode, pathCost, distPq, path);
+   bool pathFound = AStar(edges, nodeHeuristic, startNode, endNode, pathCost, distPq, path);
    if (pathFound) {
       PrintPath(startNode, endNode, path);
    }
